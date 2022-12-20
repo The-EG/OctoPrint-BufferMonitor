@@ -79,6 +79,8 @@ class BufmonPlugin(
             ))
             self.send_data_event()
 
+        return line
+
     def send_data_event(self):
         event = octoprint.events.Events.PLUGIN_BUFMON_BUFFER_DATA
         self._event_bus.fire(event, payload={
