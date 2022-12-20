@@ -1,0 +1,3 @@
+{
+    "python.defaultInterpreterPath": "../OctoPrint/venv/bin/python"
+}

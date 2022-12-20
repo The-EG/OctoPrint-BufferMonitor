@@ -1,0 +1,4 @@
+include README.md
+recursive-include octoprint_bufmon/templates *
+recursive-include octoprint_bufmon/translations *
+recursive-include octoprint_bufmon/static *
