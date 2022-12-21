@@ -14,14 +14,14 @@ $(function() {
 
         self.lastPlanner = ko.observable(undefined);
         self.meanPlanner = ko.observable(undefined);
-        self.lastBlock = ko.observable(undefined);
-        self.meanBlock = ko.observable(undefined);
+        self.lastInput = ko.observable(undefined);
+        self.meanInput = ko.observable(undefined);
 
         self.onEventplugin_bufmon_buffer_data = function(payload) {
             self.meanPlanner(payload.mean_planner.toFixed(1));
             self.lastPlanner(payload.last_planner.toFixed(0));
-            self.meanBlock(payload.mean_block.toFixed(1));
-            self.lastBlock(payload.last_block.toFixed(0));
+            self.meanInput(payload.mean_input.toFixed(1));
+            self.lastInput(payload.last_input.toFixed(0));
         }
     }
 

@@ -5,7 +5,19 @@ import re
 import datetime
 import octoprint.plugin
 
-ADV_OK_PAT = re.compile(r"^ok\s+(N(?P<line>\d+)\s+)?P(?P<planner>\d+)\s+B(?P<block>\d+).*$")
+ADV_OK_PAT = re.compile(r"^ok\s+(N(?P<line>\d+)\s+)?P(?P<planner>\d+)\s+B(?P<input>\d+).*$")
+
+MOVEMENT_CMS = [
+    'G0',
+    'G1',
+    'G2',
+    'G3',
+    'G5',
+    'G6',
+    'G10',
+    'G11',
+    'G80'
+]
 
 class BufmonPlugin(
     octoprint.plugin.SettingsPlugin,
@@ -14,6 +26,10 @@ class BufmonPlugin(
     octoprint.plugin.TemplatePlugin
 ):
     def __init__(self):
+        self._planner_size = 0
+        self._input_size = 0
+        self._detect_sizes = False
+
         self._in_print = False
         self._last_planner = None
         self._min_planner = None
@@ -21,12 +37,12 @@ class BufmonPlugin(
         self._mean_planner = None
         self._ttl_planner = 0
         self._cnt_planner = 0
-        self._last_block = None
-        self._min_block = None
-        self._max_block = None
-        self._mean_block = None
-        self._ttl_block = 0
-        self._cnt_block = 0
+        self._last_input = None
+        self._min_input = None
+        self._max_input = None
+        self._mean_input = None
+        self._ttl_input = 0
+        self._cnt_input = 0
 
         self._last_msg = None
 
@@ -47,18 +63,32 @@ class BufmonPlugin(
             "css": ["css/bufmon.css"]
         }
 
+    def on_gcode_sending(self, comm_instance, phase, cmd, cmd_type, gcode, subcode=None, tags=None, *args, **kwargs):
+        if cmd=='M115':
+            self._logger.info("Detecting buffer sizes...")
+            self._detect_sizes = True
+
     ##~~ GCode Recieve hook
     def parse_ok(self, comm, line, *args, **kwargs):
-        if not self._in_print or not (len(line) >= 3 and line[:3] == 'ok '): return line
+        if not (len(line) >= 3 and line[:3] == 'ok '): return line
+        if not self._detect_sizes and not self._in_print: return line
 
         m = ADV_OK_PAT.match(line)
         if m is None: return line
 
         p = int(m.group('planner'))
-        b = int(m.group('block'))
+        b = int(m.group('input'))
+
+        if self._detect_sizes:
+            self._planner_size = p + 1
+            self._logger.info(f"Detected planner buffer size: {self._planner_size}")
+            self._input_size = b + 1
+            self._logger.info(f"Detected input buffer size: {self._input_size}")
+            self._detect_sizes = False
+            return line
 
         self._last_planner = p
-        self._last_block = b
+        self._last_input = b
 
         if self._min_planner is None or self._min_planner > p: self._min_planner = p
         if self._max_planner is None or self._max_planner < p: self._max_planner = p
@@ -66,16 +96,16 @@ class BufmonPlugin(
         self._cnt_planner += 1
         self._mean_planner = self._ttl_planner / self._cnt_planner
         
-        if self._min_block is None or self._min_block > b: self._min_block = b
-        if self._max_block is None or self._max_block < b: self._max_block = b
-        self._ttl_block += b
-        self._cnt_block += 1
-        self._mean_block = self._ttl_block / self._cnt_block
+        if self._min_input is None or self._min_input > b: self._min_input = b
+        if self._max_input is None or self._max_input < b: self._max_input = b
+        self._ttl_input += b
+        self._cnt_input += 1
+        self._mean_input = self._ttl_input / self._cnt_input
 
         if self._last_msg is None or (datetime.datetime.now() - self._last_msg).total_seconds() > 1.0:
             self._last_msg = datetime.datetime.now()
-            self._logger.debug('min_block {0}, max_block {1}, mean_block {2}, min_planner {3}, max_planner {4}, mean_planner {5}'.format(
-                self._min_block, self._max_block, self._mean_block, self._min_planner, self._max_planner, self._mean_planner
+            self._logger.debug('min_input {0}, max_input {1}, mean_input {2}, min_planner {3}, max_planner {4}, mean_planner {5}'.format(
+                self._min_input, self._max_input, self._mean_input, self._min_planner, self._max_planner, self._mean_planner
             ))
             self.send_data_event()
 
@@ -85,13 +115,13 @@ class BufmonPlugin(
         event = octoprint.events.Events.PLUGIN_BUFMON_BUFFER_DATA
         self._event_bus.fire(event, payload={
             'last_planner': self._last_planner,
-            'last_block': self._last_block,
+            'last_input': self._last_input,
             'min_planner': self._min_planner,
             'max_planner': self._max_planner,
             'mean_planner': self._mean_planner,
-            'min_block': self._min_block,
-            'max_block': self._max_block,
-            'mean_block': self._mean_block
+            'min_input': self._min_input,
+            'max_input': self._max_input,
+            'mean_input': self._mean_input
         })
 
     def on_event(self, event, payload):
@@ -103,11 +133,11 @@ class BufmonPlugin(
             self._mean_planner = None
             self._ttl_planner = 0
             self._cnt_planner = 0
-            self._min_block = None
-            self._max_block = None
-            self._mean_block = None
-            self._ttl_block = 0
-            self._cnt_block = 0
+            self._min_input = None
+            self._max_input = None
+            self._mean_input = None
+            self._ttl_input = 0
+            self._cnt_input = 0
         elif event in ('PrintDone', 'PrintCancelled'):
             self._logger.debug("Print ended")
             self._in_print = False
@@ -171,5 +201,6 @@ def __plugin_load__():
     __plugin_hooks__ = {
         "octoprint.plugin.softwareupdate.check_config": __plugin_implementation__.get_update_information,
         "octoprint.comm.protocol.gcode.received": __plugin_implementation__.parse_ok,
+        "octoprint.comm.protocol.gcode.sending": __plugin_implementation__.on_gcode_sending,
         "octoprint.events.register_custom_events": __plugin_implementation__.register_custom_events
     }
