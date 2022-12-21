@@ -31,18 +31,9 @@ class BufmonPlugin(
         self._detect_sizes = False
 
         self._in_print = False
-        self._last_planner = None
-        self._min_planner = None
-        self._max_planner = None
-        self._mean_planner = None
-        self._ttl_planner = 0
-        self._cnt_planner = 0
-        self._last_input = None
-        self._min_input = None
-        self._max_input = None
-        self._mean_input = None
-        self._ttl_input = 0
-        self._cnt_input = 0
+        self._planner_hist = {}
+        self._input_hist = {}
+        self._print_name = None
 
         self._last_msg = None
 
@@ -87,57 +78,39 @@ class BufmonPlugin(
             self._detect_sizes = False
             return line
 
-        self._last_planner = p
-        self._last_input = b
+        if p not in self._planner_hist:
+            self._logger.warning(f"Planner buffer size incorrect? {p} not in _planner_hist")
+            self._planner_hist[p] = 0
+        if b not in self._input_hist:
+            self._logger.warning(f"Input buffer size incorrect? {b} not in _input_hist")
+            self._input_hist[b] = 0
 
-        if self._min_planner is None or self._min_planner > p: self._min_planner = p
-        if self._max_planner is None or self._max_planner < p: self._max_planner = p
-        self._ttl_planner += p
-        self._cnt_planner += 1
-        self._mean_planner = self._ttl_planner / self._cnt_planner
-        
-        if self._min_input is None or self._min_input > b: self._min_input = b
-        if self._max_input is None or self._max_input < b: self._max_input = b
-        self._ttl_input += b
-        self._cnt_input += 1
-        self._mean_input = self._ttl_input / self._cnt_input
+        self._planner_hist[p] += 1
+        self._input_hist[b] += 1
 
         if self._last_msg is None or (datetime.datetime.now() - self._last_msg).total_seconds() > 1.0:
             self._last_msg = datetime.datetime.now()
-            self._logger.debug('min_input {0}, max_input {1}, mean_input {2}, min_planner {3}, max_planner {4}, mean_planner {5}'.format(
-                self._min_input, self._max_input, self._mean_input, self._min_planner, self._max_planner, self._mean_planner
-            ))
             self.send_data_event()
 
         return line
 
     def send_data_event(self):
         event = octoprint.events.Events.PLUGIN_BUFMON_BUFFER_DATA
-        self._event_bus.fire(event, payload={
-            'last_planner': self._last_planner,
-            'last_input': self._last_input,
-            'min_planner': self._min_planner,
-            'max_planner': self._max_planner,
-            'mean_planner': self._mean_planner,
-            'min_input': self._min_input,
-            'max_input': self._max_input,
-            'mean_input': self._mean_input
-        })
+        data = {
+            'planner_hist': self._planner_hist,
+            'input_hist': self._input_hist,
+            'print_name': self._print_name
+        }
+        self._logger.debug(f"Sending buffer data: {data}")
+        self._event_bus.fire(event, payload=data)
 
     def on_event(self, event, payload):
         if event=='PrintStarted':
             self._logger.debug("Print started")
+            self._print_name = payload['name']
             self._in_print = True
-            self._min_planner = None
-            self._max_planner = None
-            self._mean_planner = None
-            self._ttl_planner = 0
-            self._cnt_planner = 0
-            self._min_input = None
-            self._max_input = None
-            self._mean_input = None
-            self._ttl_input = 0
-            self._cnt_input = 0
+            self._planner_hist = { p:0 for p in range(self._planner_size) }
+            self._input_hist = { i:0 for i in range(self._input_size) }
         elif event in ('PrintDone', 'PrintCancelled'):
             self._logger.debug("Print ended")
             self._in_print = False
